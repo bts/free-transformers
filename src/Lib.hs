@@ -14,6 +14,7 @@
 
 module Lib where
 
+import           Prelude hiding (log)
 import           Control.Lens
 import           Control.Monad.Free
 import           Data.Proxy
@@ -136,3 +137,27 @@ example2 messageId = do
 
 
 
+
+
+-- Adding another algebra
+
+data LogF a
+  = Log String a
+  deriving (Functor)
+
+class Functor f => Logging f where
+  log :: String -> Free f ()
+
+instance (LogF :<: f) => Logging f where
+  log msg = liftF $ inject $ Log msg ()
+
+-- A program which both gets a message and does some logging side-by-side. This
+-- is not as modular as we could be, by adding a Store-to-Logging interpreter,
+-- composing that with a Store-to-lower-level interpreter, and using this
+-- composite interpreter.
+storeAndLog :: (StoreF :<: f, LogF :<: f)
+            => MessageId
+            -> Free f Message
+storeAndLog mId = do
+  log "getting a message"
+  getMessage mId
