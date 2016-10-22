@@ -65,7 +65,11 @@ instance Inject ('Found p) f r => Inject ('Found ('R p)) f (l :+: r) where
 
 type f :<: g = (Inject (Elem f g) f g, Functor g)
 
-inject :: forall f g a. (f :<: g) => f a -> g a
+-- TODO: possibly use some standard natural transformation definition?
+type f ~> g = forall a. f a -> g a
+infixr 4 ~> -- TODO: not sure if this precedence level is correct for Haskell
+
+inject :: forall f g. (f :<: g) => f ~> g
 inject = review (inj resolution)
   where
     resolution :: Proxy (Elem f g)
