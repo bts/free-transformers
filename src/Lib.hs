@@ -63,7 +63,7 @@ instance Inject ('Found p) f l => Inject ('Found ('L p)) f (l :+: r) where
 instance Inject ('Found p) f r => Inject ('Found ('R p)) f (l :+: r) where
   inj _ = _InR . inj (Proxy :: Proxy ('Found p))
 
-type f :<: g = (Inject (Elem f g) f g, Functor f, Functor g)
+type f :<: g = (Inject (Elem f g) f g, Functor g)
 
 inject :: forall f g a. (f :<: g) => f a -> g a
 inject = review (inj resolution)
