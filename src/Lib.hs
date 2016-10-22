@@ -161,3 +161,23 @@ storeAndLog :: (StoreF :<: f, LogF :<: f)
 storeAndLog mId = do
   log "getting a message"
   getMessage mId
+
+
+
+-- A database algebra
+
+data Row
+type Sql = String
+
+data DatabaseF a
+  = Query Sql (Row -> a)
+  | Execute Sql a
+  deriving (Functor)
+
+class Functor f => Database f where
+  query :: Sql -> Free f Row
+  execute :: Sql -> Free f ()
+
+instance (DatabaseF :<: f) => Database f where
+  query sql = liftF $ inject $ Query sql id
+  execute sql = liftF $ inject $ Execute sql ()
