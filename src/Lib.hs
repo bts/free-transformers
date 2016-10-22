@@ -181,3 +181,54 @@ class Functor f => Database f where
 instance (DatabaseF :<: f) => Database f where
   query sql = liftF $ inject $ Query sql id
   execute sql = liftF $ inject $ Execute sql ()
+
+
+
+
+-- Interpretation
+
+type Interpreter f g = f ~> Free g
+type f ~< g = Interpreter f g
+infixr 4 ~< -- TODO: not sure if this precedence level is correct for Haskell
+
+
+storeDatabase :: StoreF ~< DatabaseF
+storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
+  where
+    sql :: MessageId -> Sql
+    sql = undefined
+    mkMessage :: Row -> Message
+    mkMessage = undefined
+storeDatabase (PutMessage m next) = next . const m <$> execute (sql m)
+  where
+    sql :: Message -> Sql
+    sql = undefined
+
+
+
+
+-- Interpreter composition
+--
+--   Cases:
+--     1. a ~< b -> a ~< c -> a ~< (b :+: c)
+--          e.g. composing storeDatabase and storeLogging
+--     2. a ~< c -> b ~< c -> (a :+: b) ~< c
+--     3. b ~< d -> c ~< d -> a ~< (b :+: c) -> a ~< d
+--
+--   To get these operators in terms of algebraic abstractions, it seems we
+--   probably need second-order Arrow/ArrowChoice for &&&, |||, +++, and
+--   possibly *** (or maybe we only need Profunctor?).
+--
+
+
+
+
+-- TODO: Experiment with Inject for interpreter composition
+
+
+
+
+-- Execution
+
+-- TODO: DatabaseF ~> IO
+-- TODO: LogF ~> IO
