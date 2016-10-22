@@ -92,44 +92,47 @@ data StoreF a
 
 
 
--- Example 1: more generic typeclass targeting any functor
+-- Example 1: (less generic) typeclass targeting Free
 
-class Store (f :: * -> *) where
-  getMessage :: MessageId -> f Message
-  putMessage :: Message -> f Message
+class Functor f => Store f where
+  getMessage :: MessageId -> Free f Message
+  putMessage :: Message -> Free f Message
 
-instance Store StoreF where
-  getMessage mId = GetMessage mId id
-  putMessage m = PutMessage m id
+instance (StoreF :<: f) => Store f where
+  getMessage mId = liftF $ inject $ GetMessage mId id
+  putMessage m = liftF $ inject $ PutMessage m id
 
-instance (StoreF :<: g) => Store (Free g) where
-  getMessage mId = liftF $ inject (getMessage mId :: StoreF Message)
-  putMessage m = liftF $ inject (putMessage m :: StoreF Message)
-
-example1 :: (StoreF :<: f)
+example2 :: (StoreF :<: f)
          => MessageId
          -> Free f Message
-example1 messageId = do
+example2 messageId = do
   msg <- getMessage messageId
   -- ... modify msg ...
   putMessage msg
 
 
 
--- Example 2: typeclass targeting Free
+-- -- Example 2: more generic typeclass targeting any functor
+--
+-- class Functor f => Store f where
+--   getMessage :: MessageId -> f Message
+--   putMessage :: Message -> f Message
+--
+-- instance Store StoreF where
+--   getMessage mId = GetMessage mId id
+--   putMessage m = PutMessage m id
+--
+-- instance (StoreF :<: g) => Store (Free g) where
+--   getMessage mId = liftF $ inject (getMessage mId :: StoreF Message)
+--   putMessage m = liftF $ inject (putMessage m :: StoreF Message)
+--
+-- example2 :: (StoreF :<: f)
+--          => MessageId
+--          -> Free f Message
+-- example2 messageId = do
+--   msg <- getMessage messageId
+--   -- ... modify msg ...
+--   putMessage msg
 
-class StoreDsl (f :: * -> *) where
-  getMessage2 :: MessageId -> Free f Message
-  putMessage2 :: Message -> Free f Message
 
-instance (StoreF :<: f) => StoreDsl f where
-  getMessage2 mId = liftF $ inject $ GetMessage mId id
-  putMessage2 m = liftF $ inject $ PutMessage m id
 
-example2 :: (StoreF :<: f)
-         => MessageId
-         -> Free f Message
-example2 messageId = do
-  msg <- getMessage2 messageId
-  -- ... modify msg ...
-  putMessage2 msg
