@@ -43,12 +43,12 @@ type family Elem e f :: Resolution where
   Elem e f         = 'NotFound
 
 type family Choose e f :: Resolution where
-    Choose ('Found x) ('Found y) = 'Ambiguous
-    Choose 'Ambiguous x = 'Ambiguous
-    Choose x 'Ambiguous = 'Ambiguous
-    Choose ('Found a) b = 'Found ('L a)
-    Choose a ('Found b) = 'Found ('R b)
-    Choose a b = 'NotFound
+  Choose ('Found x) ('Found y) = 'Ambiguous
+  Choose 'Ambiguous x = 'Ambiguous
+  Choose x 'Ambiguous = 'Ambiguous
+  Choose ('Found a) b = 'Found ('L a)
+  Choose a ('Found b) = 'Found ('R b)
+  Choose a b = 'NotFound
 
 type Injection f g = forall a. Prism' (g a) (f a)
 
