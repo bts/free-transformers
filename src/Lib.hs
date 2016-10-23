@@ -42,7 +42,7 @@ type family Elem e f :: Resolution where
   Elem e (l :+: r) = Choose (Elem e l) (Elem e r)
   Elem e f         = 'NotFound
 
-type family Choose e f :: Resolution where
+type family Choose a b :: Resolution where
   Choose ('Found x) ('Found y) = 'Ambiguous
   Choose 'Ambiguous x = 'Ambiguous
   Choose x 'Ambiguous = 'Ambiguous
