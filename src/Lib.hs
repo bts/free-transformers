@@ -17,6 +17,7 @@ module Lib where
 import           Prelude hiding (log)
 import           Control.Lens
 import           Control.Monad.Free
+import           Control.Monad (void)
 import           Data.Proxy
 
 -- Coproducts, and prism/typeclass-based injection
@@ -75,6 +76,9 @@ inject = review (inj resolution)
   where
     resolution :: Proxy (Elem f g)
     resolution = Proxy
+
+newtype Halt f a = Halt (f ()) deriving (Functor)
+
 
 
 --
@@ -205,6 +209,22 @@ storeDatabase (PutMessage m next) = next . const m <$> execute (sql m)
     sql = undefined
 
 
+
+-- TODO: not sure if this is correct...
+halt :: Functor f => Free f () -> Free (Halt f) a
+-- halt (Pure ()) = Free $ Halt $ pure () -- TODO: or maybe take a default value
+halt (Pure ()) = error "expected a program of length 1?"
+halt (Free as) = Free $ Halt $ void as
+
+storeLogging :: StoreF ~< Halt LogF
+storeLogging (GetMessage _mId _next) = halt $ log "getting message"
+storeLogging (PutMessage _m _next) = halt $ log "putting message"
+
+-- TODO: how to best handle if we didn't want to log for every action in an
+-- algebra? Add a Noop LogF constructor? or use Coproduct with Const or
+-- something?
+
+-- TODO: what if we wanted to log more than once in response to an operation?
 
 
 -- Interpreter composition
