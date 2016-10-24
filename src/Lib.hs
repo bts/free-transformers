@@ -67,7 +67,6 @@ instance Inject ('Found p) f r => Inject ('Found ('R p)) f (l :+: r) where
 
 type f :<: g = (Inject (Elem f g) f g, Functor g)
 
--- TODO: possibly use some standard natural transformation definition?
 type f ~> g = forall a. f a -> g a
 infixr 4 ~> -- TODO: not sure if this precedence level is correct for Haskell
 
@@ -85,15 +84,15 @@ inject = review (inj resolution)
 data MessageId
 data Message
 
--- CPS transformation of Store, to get a base functor:
+class Functor f => Store f where
+  getMessage :: MessageId -> Free f Message
+  putMessage :: Message -> Free f Message
+
+-- CPS transform of Store (if it targeted `f Message`), to get a base functor:
 data StoreF a
   = GetMessage MessageId (Message -> a)
   | PutMessage Message (Message -> a)
   deriving (Functor)
-
-class Functor f => Store f where
-  getMessage :: MessageId -> Free f Message
-  putMessage :: Message -> Free f Message
 
 instance (StoreF :<: f) => Store f where
   getMessage mId = liftF $ inject $ GetMessage mId id
