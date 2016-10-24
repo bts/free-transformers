@@ -163,7 +163,7 @@ storeAndLog mId = do
 
 -- A database algebra
 
-data Row
+type Row = (Int, String)
 type Sql = String
 
 data DatabaseF a
@@ -223,6 +223,24 @@ storeLogging (PutMessage _m _next) = eff $ return ()
 
 
 
+-- Execution
+
+execDatabase :: DatabaseF ~> IO
+execDatabase (Query sql next) = next <$> queryDb sql
+  where
+    queryDb :: Sql -> IO Row
+    queryDb _ = return (1, "data")
+execDatabase (Execute sql next) = next <$ execDb sql
+  where
+    execDb :: Sql -> IO ()
+    execDb _ = return ()
+
+execLogging :: LogF ~> IO
+execLogging (Log str next) = next <$ putStrLn str
+
+
+
+
 -- Interpreter composition
 --
 --   Cases:
@@ -235,16 +253,4 @@ storeLogging (PutMessage _m _next) = eff $ return ()
 --   probably need second-order Arrow/ArrowChoice for &&&, |||, +++, and
 --   possibly *** (or maybe we only need Profunctor?).
 --
-
-
-
-
--- TODO: Experiment with Inject for interpreter composition
-
-
-
-
--- Execution
-
--- TODO: DatabaseF ~> IO
--- TODO: LogF ~> IO
+-- TODO: also try experimenting with Inject for interpreter composition
