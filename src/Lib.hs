@@ -212,14 +212,14 @@ data Halt f a
   | Noop
   deriving (Functor)
 
-halt :: Functor f => Free f () -> Free (Halt f) a
-halt (Pure ()) = Free Noop
-halt (Free as) = Free $ Effect $ void as
+eff :: Functor f => Free f () -> Free (Halt f) a
+eff (Pure ()) = Free Noop
+eff (Free as) = Free $ Effect $ void as
 
 
 storeLogging :: StoreF ~< Halt LogF
-storeLogging (GetMessage _mId _next) = halt $ log "getting message"
-storeLogging (PutMessage _m _next) = halt $ return ()
+storeLogging (GetMessage _mId _next) = eff $ log "getting message"
+storeLogging (PutMessage _m _next) = eff $ return ()
 
 
 
