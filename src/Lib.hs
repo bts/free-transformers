@@ -12,6 +12,13 @@
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
 
+-- "Free transformers" aka the onion architecture
+--
+-- adapted from a combination of:
+-- - http://degoes.net/articles/modern-fp
+-- - http://degoes.net/articles/modern-fp-part-2
+-- - http://mpickering.github.io/posts/2014-12-20-closed-type-family-data-types.html
+--
 module Lib where
 
 import           Prelude hiding (log)
@@ -20,12 +27,10 @@ import           Control.Monad.Free
 import           Control.Monad (void)
 import           Data.Proxy
 
+
+
+
 -- Coproducts, and prism/typeclass-based injection
---
--- adapted from a combination of:
--- - http://mpickering.github.io/posts/2014-12-20-closed-type-family-data-types.html
--- - http://degoes.net/articles/modern-fp
--- - http://degoes.net/articles/modern-fp-part-2
 
 data (f :+: g) e
   = InL (f e)
@@ -75,6 +80,8 @@ inject = review (inj resolution)
   where
     resolution :: Proxy (Elem f g)
     resolution = Proxy
+
+-- TODO: probably add a function for `liftF . inject`
 
 
 
@@ -130,7 +137,6 @@ example2 messageId = do
 --   msg <- getMessage messageId
 --   -- ... modify msg ...
 --   putMessage msg
-
 
 
 
