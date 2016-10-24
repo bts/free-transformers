@@ -88,8 +88,8 @@ inject = review (inj resolution)
 
 -- A simple algebra with a typeclass targeting Free
 
-data MessageId
-data Message
+newtype MessageId = MessageId Int deriving (Show)
+newtype Message = Message String
 
 class Functor f => Store f where
   getMessage :: MessageId -> Free f Message
@@ -199,13 +199,15 @@ storeDatabase :: StoreF ~< DatabaseF
 storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
   where
     sql :: MessageId -> Sql
-    sql = undefined
+    sql (MessageId mid) = "select * from messages where id = " ++ show mid
+
     mkMessage :: Row -> Message
-    mkMessage = undefined
+    mkMessage (_id, body) = Message body
+
 storeDatabase (PutMessage m next) = next . const m <$> execute (sql m)
   where
-    sql :: Message -> Sql
-    sql = undefined
+    sql :: Message -> Sql -- insecure demo code:
+    sql (Message body) = "insert into messages values (" ++ show body ++ ")"
 
 
 
