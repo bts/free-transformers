@@ -77,14 +77,10 @@ inject = review (inj resolution)
     resolution :: Proxy (Elem f g)
     resolution = Proxy
 
-newtype Halt f a = Halt (f ()) deriving (Functor)
 
 
 
---
--- Example usage
---
-
+-- A simple algebra with a typeclass targeting Free
 
 data MessageId
 data Message
@@ -94,10 +90,6 @@ data StoreF a
   = GetMessage MessageId (Message -> a)
   | PutMessage Message (Message -> a)
   deriving (Functor)
-
-
-
--- Example 1: (less generic) typeclass targeting Free
 
 class Functor f => Store f where
   getMessage :: MessageId -> Free f Message
@@ -117,7 +109,8 @@ example2 messageId = do
 
 
 
--- -- Example 2: more generic typeclass targeting any functor
+
+-- -- Alternative algebra: a more generic typeclass targeting any functor
 --
 -- class Functor f => Store f where
 --   getMessage :: MessageId -> f Message
@@ -168,6 +161,7 @@ storeAndLog mId = do
 
 
 
+
 -- A database algebra
 
 data Row
@@ -210,21 +204,24 @@ storeDatabase (PutMessage m next) = next . const m <$> execute (sql m)
 
 
 
--- TODO: not sure if this is correct...
+
+-- Effectful interpretation
+
+data Halt f a
+  = Effect (f ())
+  | Noop
+  deriving (Functor)
+
 halt :: Functor f => Free f () -> Free (Halt f) a
--- halt (Pure ()) = Free $ Halt $ pure () -- TODO: or maybe take a default value
-halt (Pure ()) = error "expected a program of length 1?"
-halt (Free as) = Free $ Halt $ void as
+halt (Pure ()) = Free Noop
+halt (Free as) = Free $ Effect $ void as
+
 
 storeLogging :: StoreF ~< Halt LogF
 storeLogging (GetMessage _mId _next) = halt $ log "getting message"
-storeLogging (PutMessage _m _next) = halt $ log "putting message"
+storeLogging (PutMessage _m _next) = halt $ return ()
 
--- TODO: how to best handle if we didn't want to log for every action in an
--- algebra? Add a Noop LogF constructor? or use Coproduct with Const or
--- something?
 
--- TODO: what if we wanted to log more than once in response to an operation?
 
 
 -- Interpreter composition
