@@ -204,7 +204,7 @@ storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
     mkMessage :: Row -> Message
     mkMessage (_id, body) = Message body
 
-storeDatabase (PutMessage m next) = next . const m <$> execute (sql m)
+storeDatabase (PutMessage m next) = next m <$ execute (sql m)
   where
     sql :: Message -> Sql -- insecure demo code:
     sql (Message body) = "insert into messages values (" ++ show body ++ ")"
