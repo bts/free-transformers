@@ -212,7 +212,7 @@ storeDatabase (PutMessage m next) = next m <$ execute (sql m)
 
 
 
--- Effectful interpretation
+-- Interpretation solely for effects
 
 data Halt f a
   = Effect (f ())
@@ -231,7 +231,7 @@ storeLogging (PutMessage _m _next) = eff $ return ()
 
 
 
--- Execution
+-- Interpretation into IO
 
 execDatabase :: DatabaseF ~> IO
 execDatabase (Query sql next) = next <$> queryDb sql
@@ -250,15 +250,48 @@ execLogging (Log str next) = next <$ putStrLn str
 
 
 -- Interpreter composition
+
+-- TODO: maybe use free's fold
+unhalt :: Functor f => Free (Halt f) a -> Free f ()
+unhalt (Pure _) = return ()
+unhalt (Free Noop) = return ()
+unhalt (Free (Effect action)) = liftF action
+
+-- TODO: name
+-- TODO: test
+comp1 :: (Functor b, Functor c)
+      => a ~< b
+      -> a ~< Halt c
+      -> a ~< (b :+: c)
+comp1 toBs toC a = do
+  x <- hoistFree InL $ toBs a
+  hoistFree InR $ unhalt $ toC a
+  return x
+
+-- TODO: name
+-- TODO: test
+comp2 :: (Functor b, Functor c)
+      => a ~< Halt b
+      -> a ~< c
+      -> a ~< (b :+: c)
+comp2 toB toCs a = do
+  hoistFree InL $ unhalt $ toB a
+  hoistFree InR $ toCs a
+
+-- TODO: a ~< b -> b ~< c -> a ~< c
+
+-- Possible other combinators, but not sure how useful they are:
 --
---   Cases:
---     1. a ~< b -> a ~< c -> a ~< (b :+: c)
---          e.g. composing storeDatabase and storeLogging
---     2. a ~< c -> b ~< c -> (a :+: b) ~< c
---     3. b ~< d -> c ~< d -> a ~< (b :+: c) -> a ~< d
+--   a ~< c -> b ~< c -> (a :+: b) ~< c
+--   b ~< d -> c ~< d -> a ~< (b :+: c) -> a ~< d
 --
---   To get these operators in terms of algebraic abstractions, it seems we
---   probably need second-order Arrow/ArrowChoice for &&&, |||, +++, and
---   possibly *** (or maybe we only need Profunctor?).
---
--- TODO: also try experimenting with Inject for interpreter composition
+-- To get these operators in terms of algebraic abstractions, it seems we
+-- probably need second-order Arrow/ArrowChoice for &&&, |||, +++, liftA2, and
+-- possibly *** (or maybe we only need Profunctor?).
+
+-- TODO: composition examples
+
+
+
+
+-- TODO: Execution
