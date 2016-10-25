@@ -18,13 +18,17 @@
 -- - http://degoes.net/articles/modern-fp
 -- - http://degoes.net/articles/modern-fp-part-2
 -- - http://mpickering.github.io/posts/2014-12-20-closed-type-family-data-types.html
+-- - https://gist.github.com/jdegoes/97459c0045f373f4eaf126998d8f65dc
+--
+-- In this example, we don't yet generalize over "computational context" (i.e.
+-- sequential/Free or parallel/FreeAp) -- everything is sequential/Free.
 --
 module Lib where
 
 import           Prelude hiding (log)
 import           Control.Lens
 import           Control.Monad.Free
-import           Control.Monad (void)
+import           Control.Monad
 import           Data.Proxy
 
 
@@ -190,10 +194,8 @@ instance (DatabaseF :<: f) => Database f where
 
 -- Interpretation
 
-type Interpreter f g = f ~> Free g
-type f ~< g = Interpreter f g
+type f ~< g = f ~> Free g
 infixr 4 ~< -- TODO: not sure if this precedence level is correct for Haskell
-
 
 storeDatabase :: StoreF ~< DatabaseF
 storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
@@ -223,15 +225,18 @@ eff :: Functor f => Free f () -> Free (Halt f) a
 eff (Pure ()) = Free Noop
 eff (Free as) = Free $ Effect $ void as
 
-
 storeLogging :: StoreF ~< Halt LogF
 storeLogging (GetMessage _mId _next) = eff $ log "getting message"
 storeLogging (PutMessage _m _next) = eff $ return ()
 
+databaseLogging :: DatabaseF ~< Halt LogF
+databaseLogging (Query _ _) = eff $ log "querying"
+databaseLogging (Execute _ _) = eff $ log "issuing execute"
 
 
 
--- Interpretation into IO
+
+-- Translation to IO
 
 execDatabase :: DatabaseF ~> IO
 execDatabase (Query sql next) = next <$> queryDb sql
@@ -251,47 +256,120 @@ execLogging (Log str next) = next <$ putStrLn str
 
 -- Interpreter composition
 
--- TODO: maybe use free's fold
 unhalt :: Functor f => Free (Halt f) a -> Free f ()
 unhalt (Pure _) = return ()
 unhalt (Free Noop) = return ()
 unhalt (Free (Effect action)) = liftF action
 
--- TODO: name
--- TODO: test
-comp1 :: (Functor b, Functor c)
-      => a ~< b
-      -> a ~< Halt c
-      -> a ~< (b :+: c)
-comp1 toBs toC a = do
-  x <- hoistFree InL $ toBs a
-  hoistFree InR $ unhalt $ toC a
-  return x
+beforeEffect :: (Functor g, Functor e)
+             => f ~< g
+             -> f ~< Halt e
+             -> f ~< (g :+: e)
+(elaborate `beforeEffect` toEff) fa = do
+  a <- hoistFree InL $ elaborate fa
+  hoistFree InR $ unhalt $ toEff fa
+  return a
 
--- TODO: name
--- TODO: test
-comp2 :: (Functor b, Functor c)
-      => a ~< Halt b
-      -> a ~< c
-      -> a ~< (b :+: c)
-comp2 toB toCs a = do
-  hoistFree InL $ unhalt $ toB a
-  hoistFree InR $ toCs a
+afterEffect :: (Functor g, Functor e)
+            => f ~< g
+            -> f ~< Halt e
+            -> f ~< (e :+: g)
+(elaborate `afterEffect` toEff) fx = do
+  hoistFree InL $ unhalt $ toEff fx
+  hoistFree InR $ elaborate fx
 
--- TODO: a ~< b -> b ~< c -> a ~< c
+weave :: (Functor g, Functor h)
+      => f ~< g
+      -> f ~< h
+      -> f ~< (g :+: h)
+weave int1 int2 fx = do
+  _ <- hoistFree InL $ int1 fx
+  hoistFree InR $ int2 fx
 
--- Possible other combinators, but not sure how useful they are:
---
---   a ~< c -> b ~< c -> (a :+: b) ~< c
---   b ~< d -> c ~< d -> a ~< (b :+: c) -> a ~< d
---
--- To get these operators in terms of algebraic abstractions, it seems we
--- probably need second-order Arrow/ArrowChoice for &&&, |||, +++, liftA2, and
--- possibly *** (or maybe we only need Profunctor?).
+(>~<) :: (Functor g, Functor h)
+      => f ~< g
+      -> f ~< h
+      -> f ~< (g :+: h)
+int1 >~< int2 = weave int1 int2
 
--- TODO: composition examples
+-- Converts an interpreter to accept a program instead of an instruction.
+acceptProgram :: Monad g
+              => f ~> g
+              -> Free f ~> g
+acceptProgram = foldFree
+
+-- "Horizontal" interpreter composition
+hCompose :: (Monad h)
+         => g ~> h
+         -> f ~< g
+         -> f ~> h
+int2 `hCompose` int1 = acceptProgram int2 . int1
+
+(~<>) :: (Monad h)
+      => f ~< g
+      -> g ~> h
+      -> f ~> h
+int1 ~<> int2 = int2 `hCompose` int1
+
+-- TODO: precedence for operators like this.
+
+hComposeEffect :: (Functor g, Monad h)
+      => g ~> h
+      -> f ~< Halt g
+      -> f a
+      -> h ()
+int2 `hComposeEffect` int1 = acceptProgram int2 . unhalt . int1
+
+(~<!>) :: (Functor g, Monad h)
+       => f ~< Halt g
+       -> g ~> h
+       -> f a
+       -> h ()
+int1 ~<!> int2 = int2 `hComposeEffect` int1
+
+-- TODO:     a ~> c -> b ~> c -> (a :+: b) ~> c
+-- possibly: b ~> d -> c ~> d -> a ~< (b :+: c) -> a ~> d
+
+-- TODO: "Vertical" interpreter composition
+-- vCompose :: a ~< b -> a ~< c -> a ~< Product b c
+-- vCompose = _todoVert
+
+-- TODO: Monoidal composition
+--   "Interpreters compose monoidally as per the operations supported by
+-- T[_[_], _]. For example, if T supports a notion of failure, then two T[F, A]
+-- operations can be appended together, such that the first computation is used
+-- if it succeeds, otherwise the second. Racing is another example of monoidal
+-- composition possible with parallel computations."
+
+execStoreDbLogging :: Free StoreF a -> IO ()
+execStoreDbLogging =
+  acceptProgram storeDatabase ~<> databaseLogging ~<!> execLogging
+
+-- TODO: full composition example
 
 
 
 
--- TODO: Execution
+-- Representing interpreter composition in terms of higher algebraic abstractions
+
+class Category1 (cat1 :: (* -> *) -> (* -> *) -> *) where
+  id1 :: forall f. (Functor f) => cat1 f f
+
+  compose1 :: forall f g h. (Functor f, Functor g, Functor h)
+           => cat1 g h -> cat1 f g -> cat1 f h
+
+newtype Interpreter f g = Interpreter { unInterpreter :: f ~< g }
+
+instance Category1 Interpreter where
+  id1 = Interpreter liftF
+
+  (Interpreter cgh) `compose1` (Interpreter cfg) =
+    Interpreter $ cfg ~<> cgh
+
+-- TODO: Arrow1/ArrowChoice1 for operators like &&&, |||, +++, ***
+--       Also, how does Profunctor fit in, if at all?
+
+
+
+
+-- TODO: Using Codensity/CPS to increase efficiency
