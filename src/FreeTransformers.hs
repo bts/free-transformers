@@ -72,7 +72,12 @@ inject = review (inj resolution)
     resolution :: Proxy (Elem f g)
     resolution = Proxy
 
--- TODO: probably add a function for `liftF . inject`
+type f ~< g = f ~> Free g
+infixr 4 ~<
+
+-- Creates a Free program from the provided injectable instruction
+instruction :: (f :<: g) => f ~< g
+instruction = liftF . inject
 
 
 
@@ -93,8 +98,8 @@ data StoreF a
   deriving (Functor)
 
 instance (StoreF :<: f) => Store f where
-  getMessage mId = liftF $ inject $ GetMessage mId id
-  putMessage m = liftF $ inject $ PutMessage m id
+  getMessage mId = instruction $ GetMessage mId id
+  putMessage m = instruction $ PutMessage m id
 
 getThenPut :: (StoreF :<: f)
            => MessageId
@@ -118,8 +123,8 @@ getThenPut messageId = do
 --   putMessage m = PutMessage m id
 --
 -- instance (StoreF :<: g) => Store (Free g) where
---   getMessage mId = liftF $ inject (getMessage mId :: StoreF Message)
---   putMessage m = liftF $ inject (putMessage m :: StoreF Message)
+--   getMessage mId = instruction (getMessage mId :: StoreF Message)
+--   putMessage m = instruction (putMessage m :: StoreF Message)
 --
 -- example2 :: (StoreF :<: f)
 --          => MessageId
@@ -142,7 +147,7 @@ class Functor f => Logging f where
   log :: String -> Free f ()
 
 instance (LogF :<: f) => Logging f where
-  log msg = liftF $ inject $ Log msg ()
+  log msg = instruction $ Log msg ()
 
 -- A program which both gets a message and does some logging side-by-side. This
 -- is not as modular as we could be, by adding a Store-to-Logging interpreter,
@@ -173,16 +178,13 @@ class Functor f => Database f where
   execute :: Sql -> Free f ()
 
 instance (DatabaseF :<: f) => Database f where
-  query sql = liftF $ inject $ Query sql id
-  execute sql = liftF $ inject $ Execute sql ()
+  query sql = instruction $ Query sql id
+  execute sql = instruction $ Execute sql ()
 
 
 
 
 -- Interpretation
-
-type f ~< g = f ~> Free g
-infixr 4 ~<
 
 storeDatabase :: StoreF ~< DatabaseF
 storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
