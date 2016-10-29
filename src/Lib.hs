@@ -13,17 +13,6 @@
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
 
--- "Free transformers" aka the onion architecture
---
--- adapted from a combination of:
--- - http://degoes.net/articles/modern-fp
--- - http://degoes.net/articles/modern-fp-part-2
--- - http://mpickering.github.io/posts/2014-12-20-closed-type-family-data-types.html
--- - https://gist.github.com/jdegoes/97459c0045f373f4eaf126998d8f65dc
---
--- In this example, we don't yet generalize over "computational context" (i.e.
--- sequential/Free or parallel/FreeAp) -- everything is sequential/Free.
---
 module Lib where
 
 import           Control.Lens
@@ -31,9 +20,6 @@ import           Control.Monad
 import           Control.Monad.Free
 import           Data.Proxy
 import           Prelude            hiding (log)
-
-
-
 
 -- Coproducts, and prism/typeclass-based injection
 
