@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE KindSignatures        #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
@@ -25,11 +26,11 @@
 --
 module Lib where
 
-import           Prelude hiding (log)
 import           Control.Lens
-import           Control.Monad.Free
 import           Control.Monad
+import           Control.Monad.Free
 import           Data.Proxy
+import           Prelude            hiding (log)
 
 
 
@@ -93,7 +94,7 @@ inject = review (inj resolution)
 -- A simple algebra with a typeclass targeting Free
 
 newtype MessageId = MessageId Int deriving (Show)
-newtype Message = Message String
+newtype Message = Message String deriving (Show)
 
 class Functor f => Store f where
   getMessage :: MessageId -> Free f Message
@@ -109,10 +110,10 @@ instance (StoreF :<: f) => Store f where
   getMessage mId = liftF $ inject $ GetMessage mId id
   putMessage m = liftF $ inject $ PutMessage m id
 
-example2 :: (StoreF :<: f)
-         => MessageId
-         -> Free f Message
-example2 messageId = do
+getThenPut :: (StoreF :<: f)
+           => MessageId
+           -> Free f Message
+getThenPut messageId = do
   msg <- getMessage messageId
   -- ... modify msg ...
   putMessage msg
@@ -227,10 +228,10 @@ eff (Free as) = Free $ Effect $ void as
 
 storeLogging :: StoreF ~< Halt LogF
 storeLogging (GetMessage _mId _next) = eff $ log "getting message"
-storeLogging (PutMessage _m _next) = eff $ return ()
+storeLogging (PutMessage _m _next)   = eff $ return ()
 
 databaseLogging :: DatabaseF ~< Halt LogF
-databaseLogging (Query _ _) = eff $ log "querying"
+databaseLogging (Query _ _)   = eff $ log "querying"
 databaseLogging (Execute _ _) = eff $ log "issuing execute"
 
 
@@ -257,8 +258,8 @@ execLogging (Log str next) = next <$ putStrLn str
 -- Interpreter composition
 
 unhalt :: Functor f => Free (Halt f) a -> Free f ()
-unhalt (Pure _) = return ()
-unhalt (Free Noop) = return ()
+unhalt (Pure _)               = return ()
+unhalt (Free Noop)            = return ()
 unhalt (Free (Effect action)) = liftF action
 
 beforeEffect :: (Functor g, Functor e)
@@ -278,6 +279,8 @@ afterEffect :: (Functor g, Functor e)
   hoistFree InL $ unhalt $ toEff fx
   hoistFree InR $ elaborate fx
 
+-- TODO: add betweenEffects? e.g. for logging before and after an instruction
+
 weave :: (Functor g, Functor h)
       => f ~< g
       -> f ~< h
@@ -286,11 +289,11 @@ weave int1 int2 fx = do
   _ <- hoistFree InL $ int1 fx
   hoistFree InR $ int2 fx
 
-(>~<) :: (Functor g, Functor h)
+(~<+) :: (Functor g, Functor h)
       => f ~< g
       -> f ~< h
       -> f ~< (g :+: h)
-int1 >~< int2 = weave int1 int2
+int1 ~<+ int2 = weave int1 int2
 
 -- Converts an interpreter to accept a program instead of an instruction.
 acceptProgram :: Monad g
@@ -311,7 +314,9 @@ int2 `hCompose` int1 = acceptProgram int2 . int1
       -> f ~> h
 int1 ~<> int2 = int2 `hCompose` int1
 
+--
 -- TODO: precedence for operators like this.
+--
 
 hComposeEffect :: (Functor g, Monad h)
       => g ~> h
@@ -327,7 +332,18 @@ int2 `hComposeEffect` int1 = acceptProgram int2 . unhalt . int1
        -> h ()
 int1 ~<!> int2 = int2 `hComposeEffect` int1
 
--- TODO:     a ~> c -> b ~> c -> (a :+: b) ~> c
+mergeInterpreters :: a ~> c
+                  -> b ~> c
+                  -> (a :+: b) ~> c
+mergeInterpreters int1 int2 = \case
+  InL ax -> int1 ax
+  InR bx -> int2 bx
+
+(+~<) :: a ~> c
+      -> b ~> c
+      -> (a :+: b) ~> c
+(+~<) = mergeInterpreters
+
 -- possibly: b ~> d -> c ~> d -> a ~< (b :+: c) -> a ~> d
 
 -- TODO: "Vertical" interpreter composition
@@ -341,11 +357,17 @@ int1 ~<!> int2 = int2 `hComposeEffect` int1
 -- if it succeeds, otherwise the second. Racing is another example of monoidal
 -- composition possible with parallel computations."
 
-execStoreDbLogging :: Free StoreF a -> IO ()
-execStoreDbLogging =
-  acceptProgram storeDatabase ~<> databaseLogging ~<!> execLogging
+execOnlyLogging :: StoreF a -> IO ()
+execOnlyLogging = storeDatabase ~<> databaseLogging ~<!> execLogging
 
--- TODO: full composition example
+execStore :: StoreF ~> IO
+execStore = (storeDatabase `afterEffect` storeLogging)
+        ~<> ((+~<) execLogging execDatabase)
+
+main :: IO ()
+main = void . acceptProgram execStore $ program
+  where
+    program = getThenPut $ MessageId 1
 
 
 
