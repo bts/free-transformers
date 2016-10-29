@@ -1,6 +1,6 @@
 name:                free-transformers
 version:             0.1.0.0
-synopsis:            Initial project template from stack
+synopsis:            An example implementation of "free transformers"
 description:         Please see README.md
 homepage:            https://github.com/bts/free-transformers#readme
 license:             BSD3
