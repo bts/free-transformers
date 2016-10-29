@@ -78,7 +78,7 @@ instance Inject ('Found p) f r => Inject ('Found ('R p)) f (l :+: r) where
 type f :<: g = (Inject (Elem f g) f g, Functor g)
 
 type f ~> g = forall a. f a -> g a
-infixr 4 ~> -- TODO: not sure if this precedence level is correct for Haskell
+infixr 4 ~>
 
 inject :: forall f g. (f :<: g) => f ~> g
 inject = review (inj resolution)
@@ -161,7 +161,7 @@ instance (LogF :<: f) => Logging f where
 -- A program which both gets a message and does some logging side-by-side. This
 -- is not as modular as we could be, by adding a Store-to-Logging interpreter,
 -- composing that with a Store-to-lower-level interpreter, and using this
--- composite interpreter.
+-- composite interpreter. See below for an example of this.
 storeAndLog :: (StoreF :<: f, LogF :<: f)
             => MessageId
             -> Free f Message
@@ -196,7 +196,7 @@ instance (DatabaseF :<: f) => Database f where
 -- Interpretation
 
 type f ~< g = f ~> Free g
-infixr 4 ~< -- TODO: not sure if this precedence level is correct for Haskell
+infixr 4 ~<
 
 storeDatabase :: StoreF ~< DatabaseF
 storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
@@ -295,6 +295,8 @@ weave int1 int2 fx = do
       -> f ~< (g :+: h)
 int1 ~<+ int2 = weave int1 int2
 
+infixl 3 ~<+
+
 -- Converts an interpreter to accept a program instead of an instruction.
 acceptProgram :: Monad g
               => f ~> g
@@ -314,9 +316,7 @@ int2 `hCompose` int1 = acceptProgram int2 . int1
       -> f ~> h
 int1 ~<> int2 = int2 `hCompose` int1
 
---
--- TODO: precedence for operators like this.
---
+infixl 2 ~<>
 
 hComposeEffect :: (Functor g, Monad h)
       => g ~> h
@@ -332,6 +332,8 @@ int2 `hComposeEffect` int1 = acceptProgram int2 . unhalt . int1
        -> h ()
 int1 ~<!> int2 = int2 `hComposeEffect` int1
 
+infixl 2 ~<!>
+
 mergeInterpreters :: a ~> c
                   -> b ~> c
                   -> (a :+: b) ~> c
@@ -343,6 +345,8 @@ mergeInterpreters int1 int2 = \case
       -> b ~> c
       -> (a :+: b) ~> c
 (+~<) = mergeInterpreters
+
+infixl 3 +~<
 
 -- possibly: b ~> d -> c ~> d -> a ~< (b :+: c) -> a ~> d
 
