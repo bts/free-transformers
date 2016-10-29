@@ -13,7 +13,7 @@
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
 
-module Lib where
+module FreeTransformers where
 
 import           Control.Lens
 import           Control.Monad
