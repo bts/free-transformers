@@ -1,4 +1,6 @@
-An example implementation of "[free transformers](http://degoes.net/articles/modern-fp-part-2)" in Haskell.
+An example Haskell implementation of the
+"[free transformers](http://degoes.net/articles/modern-fp-part-2)" approach to
+building modular programs by composing layers of `Free` interpreters.
 
 This was adapted from a combination of:
 - http://mpickering.github.io/posts/2014-12-20-closed-type-family-data-types.html
