@@ -387,6 +387,3 @@ instance Category1 Interpreter where
 
 
 -- TODO: Using Codensity/CPS to increase efficiency
-
--- TODO: Experiment with functor `Pairing`s and cofree comonads:
--- http://dlaing.org/cofun/posts/coproducts_for_free_and_products_for_cofree.html)
