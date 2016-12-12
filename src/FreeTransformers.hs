@@ -1,3 +1,4 @@
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveFunctor         #-}
@@ -18,6 +19,7 @@ module FreeTransformers where
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Free
+import           Control.Monad.Free.Church
 import           Data.Proxy
 import           Prelude            hiding (log)
 
@@ -72,13 +74,12 @@ inject = review (inj resolution)
     resolution :: Proxy (Elem f g)
     resolution = Proxy
 
-type f ~< g = f ~> Free g
-infixr 4 ~<
+-- type f ~< g = f ~> Free g
+-- infixr 4 ~<
 
 -- Creates a Free program from the provided injectable instruction
-instruction :: (f :<: g) => f ~< g
+instruction :: (f :<: g, MonadFree g m) => f ~> m
 instruction = liftF . inject
-
 
 
 
@@ -87,9 +88,9 @@ instruction = liftF . inject
 newtype MessageId = MessageId Int deriving (Show)
 newtype Message = Message String deriving (Show)
 
-class Functor f => Store f where
-  getMessage :: MessageId -> Free f Message
-  putMessage :: Message -> Free f Message
+class MonadFree f m => Store f m | m -> f where
+  getMessage :: MessageId -> m Message
+  putMessage :: Message -> m Message
 
 -- CPS transform of Store (if it targeted `f Message`), to get a base functor:
 data StoreF a
@@ -97,13 +98,13 @@ data StoreF a
   | PutMessage Message (Message -> a)
   deriving (Functor)
 
-instance (StoreF :<: f) => Store f where
+instance (StoreF :<: f, MonadFree f m) => Store f m where
   getMessage mId = instruction $ GetMessage mId id
-  putMessage m = instruction $ PutMessage m id
+  putMessage msg = instruction $ PutMessage msg id
 
-getThenPut :: (StoreF :<: f)
+getThenPut :: (Store f m)
            => MessageId
-           -> Free f Message
+           -> m Message
 getThenPut messageId = do
   msg <- getMessage messageId
   -- ... modify msg ...
@@ -143,19 +144,19 @@ data LogF a
   = Log String a
   deriving (Functor)
 
-class Functor f => Logging f where
-  log :: String -> Free f ()
+class MonadFree f m => Logging f m where
+  log :: String -> m ()
 
-instance (LogF :<: f) => Logging f where
+instance (LogF :<: f, MonadFree f m) => Logging f m where
   log msg = instruction $ Log msg ()
 
 -- A program which both gets a message and does some logging side-by-side. This
 -- is not as modular as we could be, by adding a Store-to-Logging interpreter,
 -- composing that with a Store-to-lower-level interpreter, and using this
 -- composite interpreter. See below for an example of this.
-storeAndLog :: (StoreF :<: f, LogF :<: f)
+storeAndLog :: (Store f m, Logging f m)
             => MessageId
-            -> Free f Message
+            -> m Message
 storeAndLog mId = do
   log "getting a message"
   getMessage mId
@@ -173,11 +174,11 @@ data DatabaseF a
   | Execute Sql a
   deriving (Functor)
 
-class Functor f => Database f where
-  query :: Sql -> Free f Row
-  execute :: Sql -> Free f ()
+class MonadFree f m => Database f m where
+  query :: Sql -> m Row
+  execute :: Sql -> m ()
 
-instance (DatabaseF :<: f) => Database f where
+instance (DatabaseF :<: f, MonadFree f m) => Database f m where
   query sql = instruction $ Query sql id
   execute sql = instruction $ Execute sql ()
 
@@ -186,7 +187,7 @@ instance (DatabaseF :<: f) => Database f where
 
 -- Interpretation
 
-storeDatabase :: StoreF ~< DatabaseF
+storeDatabase :: MonadFree DatabaseF m => StoreF ~> m
 storeDatabase (GetMessage mId next) = next . mkMessage <$> query (sql mId)
   where
     sql :: MessageId -> Sql
@@ -210,17 +211,22 @@ data Halt f a
   | Noop
   deriving (Functor)
 
-eff :: Functor f => Free f () -> Free (Halt f) a
-eff (Pure ()) = Free Noop
-eff (Free as) = Free $ Effect $ void as
+-- TODO: move this and effF into sep modules
+effFree :: Functor f => Free f () -> Free (Halt f) a
+effFree (Pure ()) = wrap Noop
+effFree (Free as) = wrap $ Effect $ void as
 
-storeLogging :: StoreF ~< Halt LogF
-storeLogging (GetMessage _mId _next) = eff $ log "getting message"
-storeLogging (PutMessage _m _next)   = eff $ return ()
+-- TODO: move this and effFree into sep modules
+effF :: Functor f => F f () -> F (Halt f) a
+effF = toF . effFree . fromF -- TODO: make this more efficient!
 
-databaseLogging :: DatabaseF ~< Halt LogF
-databaseLogging (Query _ _)   = eff $ log "querying"
-databaseLogging (Execute _ _) = eff $ log "issuing execute"
+storeLogging :: StoreF ~> F (Halt LogF)
+storeLogging (GetMessage _mId _next) = effF $ log "getting message"
+storeLogging (PutMessage _m _next)   = effF $ return ()
+
+databaseLogging :: DatabaseF ~> F (Halt LogF)
+databaseLogging (Query _ _)   = effF $ log "querying"
+databaseLogging (Execute _ _) = effF $ log "issuing execute"
 
 
 
@@ -245,20 +251,37 @@ execLogging (Log str next) = next <$ putStrLn str
 
 -- Interpreter composition
 
-unhalt :: Functor f => Free (Halt f) a -> Free f ()
-unhalt (Pure _)               = return ()
-unhalt (Free Noop)            = return ()
-unhalt (Free (Effect action)) = liftF action
+-- TODO: move this into sep module
+unhaltFree :: Functor f => Free (Halt f) a -> Free f ()
+unhaltFree (Pure _)               = return ()
+unhaltFree (Free Noop)            = return ()
+unhaltFree (Free (Effect action)) = liftF action
 
-beforeEffect :: (Functor g, Functor e)
-             => f ~< g
-             -> f ~< Halt e
-             -> f ~< (g :+: e)
-(elaborate `beforeEffect` toEff) fa = do
+-- TODO: move this into sep module
+unhaltF :: Functor f => F (Halt f) a -> F f ()
+unhaltF = toF . unhaltFree . fromF -- TODO: make this more efficient!
+
+-- TODO: move this into sep module
+beforeEffectFree :: (Functor g, Functor e)
+                 => f ~> Free g
+                 -> f ~> Free (Halt e)
+                 -> f ~> Free (g :+: e)
+(elaborate `beforeEffectFree` toEff) fa = do
   a <- hoistFree InL $ elaborate fa
-  hoistFree InR $ unhalt $ toEff fa
+  hoistFree InR $ unhaltFree $ toEff fa
   return a
 
+-- TODO: move this into sep module
+beforeEffectF :: Functor e
+              => f ~> F g
+              -> f ~> F (Halt e)
+              -> f ~> F (g :+: e)
+(elaborate `beforeEffectF` toEff) fa = do
+  a <- hoistF InL $ elaborate fa
+  hoistF InR $ unhaltF $ toEff fa
+  return a
+
+{-
 afterEffect :: (Functor g, Functor e)
             => f ~< g
             -> f ~< Halt e
@@ -387,3 +410,5 @@ instance Category1 Interpreter where
 
 
 -- TODO: Using Codensity/CPS to increase efficiency
+
+-}
