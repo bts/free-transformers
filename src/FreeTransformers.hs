@@ -13,6 +13,7 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
+-- {-# LANGUAGE TypeFamilyDependencies #-}
 
 module FreeTransformers where
 
@@ -277,27 +278,59 @@ effF = toF . effFree . fromF -- TODO: make this more efficient!
 --   eff = toF . effFree . fromF -- TODO: make this more efficient!
 
 -- -- Approach B (This is going to require an injective type family?)
-class MonadFree f m => Program f m | m -> f where
-  type Substrate m :: (* -> *) -> * -> *
-  eff :: (Substrate m) f () -> (Substrate m) (Halt f) a
-
-instance Functor f => Program f (Free f) where
-  type Substrate (Free f) = Free
-
-  eff (Pure ()) = wrap Noop
-  eff (Free as) = wrap $ Effect $ void as
-
-instance Functor f => Program f (F f) where
-  type Substrate (F f) = F
-
-  eff = toF . effFree . fromF -- TODO: make this more efficient!
+-- class MonadFree f m => Program f m | m -> f where
+--   type Substrate m :: (* -> *) -> * -> *
+--   eff :: (Substrate m) f () -> (Substrate m) (Halt f) a
+-- 
+-- instance Functor f => Program f (Free f) where
+--   type Substrate (Free f) = Free
+-- 
+--   eff (Pure ()) = wrap Noop
+--   eff (Free as) = wrap $ Effect $ void as
+-- 
+-- instance Functor f => Program f (F f) where
+--   type Substrate (F f) = F
+-- 
+--   eff = toF . effFree . fromF -- TODO: make this more efficient!
 
 foo :: (LogF :<: f, MonadFree f m, Functor f) => m ()
 foo = log "getting message"
 
--- storeLogging' :: Programmable free => StoreF ~> free (Halt LogF)
--- storeLogging' (GetMessage _mId _next) = eff $ foo
--- storeLogging' (PutMessage _m _next)   = eff $ return ()
+-- Approach C
+--
+-- TODO: we might be able to take `m` out of the parameters by using an equality constraint?
+-- class MonadFree f m => Program free f m | m -> f, m -> free, free f -> m where
+--   eff :: free f () -> free (Halt f) a
+--
+-- instance Functor f => Program Free f (Free f) where
+--   eff (Pure ()) = wrap Noop
+--   eff (Free as) = wrap $ Effect $ void as
+--
+-- instance Functor f => Program F f (F f) where
+--   eff = toF . effFree . fromF -- TODO: make this more efficient!
+--
+-- storeLoggingC :: Program free LogF (free LogF) => StoreF ~> free (Halt LogF)
+-- storeLoggingC (GetMessage _mId _next) = eff $ foo
+-- storeLoggingC (PutMessage _m _next)   = eff $ return ()
+
+
+-- Approach D
+class Program free f where
+  eff :: (m ~ free f, MonadFree f m) => free f () -> free (Halt f) a
+
+instance Functor f => Program Free f where
+  eff (Pure ()) = wrap Noop
+  eff (Free as) = wrap $ Effect $ void as
+
+instance Functor f => Program F f where
+  eff = toF . effFree . fromF -- TODO: make this more efficient!
+
+type Pgm free f = (Program free f, MonadFree f (free f))
+
+-- Best one so far:
+storeLoggingD :: Pgm free LogF => StoreF ~> free (Halt LogF)
+storeLoggingD (GetMessage _mId _next) = eff $ log "getting message"
+storeLoggingD (PutMessage _m _next)   = eff $ return ()
 
 
 
