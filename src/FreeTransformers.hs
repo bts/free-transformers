@@ -78,6 +78,9 @@ inject = review (inj resolution)
 -- infixr 4 ~<
 
 -- Creates a Free program from the provided injectable instruction
+-- instruction :: (f :<: g) => f ~< g
+-- instruction = liftF . inject
+
 instruction :: (f :<: g, MonadFree g m) => f ~> m
 instruction = liftF . inject
 
@@ -87,6 +90,10 @@ instruction = liftF . inject
 
 newtype MessageId = MessageId Int deriving (Show)
 newtype Message = Message String deriving (Show)
+
+-- class Functor f => Store f where
+--   getMessage :: MessageId -> Free f Message
+--   putMessage :: Message -> Free f Message
 
 class MonadFree f m => Store f m | m -> f where
   getMessage :: MessageId -> m Message
@@ -98,9 +105,21 @@ data StoreF a
   | PutMessage Message (Message -> a)
   deriving (Functor)
 
+-- instance (StoreF :<: f) => Store f where
+--   getMessage mId = instruction $ GetMessage mId id
+--   putMessage msg = instruction $ PutMessage msg id
+
 instance (StoreF :<: f, MonadFree f m) => Store f m where
   getMessage mId = instruction $ GetMessage mId id
   putMessage msg = instruction $ PutMessage msg id
+
+-- getThenPut :: (Store f)
+--            => MessageId
+--            -> Free f Message
+-- getThenPut messageId = do
+--   msg <- getMessage messageId
+--   -- ... modify msg ...
+--   putMessage msg
 
 getThenPut :: (Store f m)
            => MessageId
@@ -144,8 +163,14 @@ data LogF a
   = Log String a
   deriving (Functor)
 
+-- class Functor f => Logging f where
+--   log :: String -> Free f ()
+
 class MonadFree f m => Logging f m where
   log :: String -> m ()
+
+-- instance (LogF :<: f) => Logging f where
+--   log msg = instruction $ Log msg ()
 
 instance (LogF :<: f, MonadFree f m) => Logging f m where
   log msg = instruction $ Log msg ()
@@ -154,13 +179,19 @@ instance (LogF :<: f, MonadFree f m) => Logging f m where
 -- is not as modular as we could be, by adding a Store-to-Logging interpreter,
 -- composing that with a Store-to-lower-level interpreter, and using this
 -- composite interpreter. See below for an example of this.
+-- storeAndLog :: (Store f, Logging f)
+--             => MessageId
+--             -> Free f Message
+-- storeAndLog mId = do
+--   log "getting a message"
+--   getMessage mId
+
 storeAndLog :: (Store f m, Logging f m)
             => MessageId
             -> m Message
 storeAndLog mId = do
   log "getting a message"
   getMessage mId
-
 
 
 
@@ -211,6 +242,19 @@ data Halt f a
   | Noop
   deriving (Functor)
 
+-- eff :: Functor f => Free f () -> Free (Halt f) a
+-- eff (Pure ()) = Free Noop
+-- eff (Free as) = Free $ Effect $ void as
+-- 
+-- storeLogging :: StoreF ~> Free (Halt LogF)
+-- storeLogging (GetMessage _mId _next) = eff $ log "getting message"
+-- storeLogging (PutMessage _m _next)   = eff $ return ()
+
+
+
+
+
+
 -- TODO: move this and effF into sep modules
 effFree :: Functor f => Free f () -> Free (Halt f) a
 effFree (Pure ()) = wrap Noop
@@ -220,6 +264,43 @@ effFree (Free as) = wrap $ Effect $ void as
 effF :: Functor f => F f () -> F (Halt f) a
 effF = toF . effFree . fromF -- TODO: make this more efficient!
 
+-- -- Approach A (joel: this might require yoneda here?)
+--
+-- class Programmable (free :: (* -> *) -> * -> *) where
+--   eff :: Functor f => free f () -> free (Halt f) a
+
+-- instance Programmable Free where
+--   eff (Pure ()) = wrap Noop
+--   eff (Free as) = wrap $ Effect $ void as
+
+-- instance Programmable F where
+--   eff = toF . effFree . fromF -- TODO: make this more efficient!
+
+-- -- Approach B (This is going to require an injective type family?)
+class MonadFree f m => Program f m | m -> f where
+  type Substrate m :: (* -> *) -> * -> *
+  eff :: (Substrate m) f () -> (Substrate m) (Halt f) a
+
+instance Functor f => Program f (Free f) where
+  type Substrate (Free f) = Free
+
+  eff (Pure ()) = wrap Noop
+  eff (Free as) = wrap $ Effect $ void as
+
+instance Functor f => Program f (F f) where
+  type Substrate (F f) = F
+
+  eff = toF . effFree . fromF -- TODO: make this more efficient!
+
+foo :: (LogF :<: f, MonadFree f m, Functor f) => m ()
+foo = log "getting message"
+
+-- storeLogging' :: Programmable free => StoreF ~> free (Halt LogF)
+-- storeLogging' (GetMessage _mId _next) = eff $ foo
+-- storeLogging' (PutMessage _m _next)   = eff $ return ()
+
+
+
 storeLogging :: StoreF ~> F (Halt LogF)
 storeLogging (GetMessage _mId _next) = effF $ log "getting message"
 storeLogging (PutMessage _m _next)   = effF $ return ()
@@ -227,6 +308,7 @@ storeLogging (PutMessage _m _next)   = effF $ return ()
 databaseLogging :: DatabaseF ~> F (Halt LogF)
 databaseLogging (Query _ _)   = effF $ log "querying"
 databaseLogging (Execute _ _) = effF $ log "issuing execute"
+
 
 
 
