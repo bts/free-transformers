@@ -315,8 +315,8 @@ foo = log "getting message"
 
 
 -- Approach D
-class Program free f where
-  eff :: (m ~ free f, MonadFree f m) => free f () -> free (Halt f) a
+class MonadFree f (free f) => Program free f where
+  eff :: free f () -> free (Halt f) a
 
 instance Functor f => Program Free f where
   eff (Pure ()) = wrap Noop
@@ -325,10 +325,8 @@ instance Functor f => Program Free f where
 instance Functor f => Program F f where
   eff = toF . effFree . fromF -- TODO: make this more efficient!
 
-type Pgm free f = (Program free f, MonadFree f (free f))
-
--- Best one so far:
-storeLoggingD :: Pgm free LogF => StoreF ~> free (Halt LogF)
+-- Best one so far.
+storeLoggingD :: Program free LogF => StoreF ~> free (Halt LogF)
 storeLoggingD (GetMessage _mId _next) = eff $ log "getting message"
 storeLoggingD (PutMessage _m _next)   = eff $ return ()
 
