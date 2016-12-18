@@ -251,19 +251,14 @@ data Halt f a
 -- storeLogging (GetMessage _mId _next) = eff $ log "getting message"
 -- storeLogging (PutMessage _m _next)   = eff $ return ()
 
-
-
-
-
-
--- TODO: move this and effF into sep modules
-effFree :: Functor f => Free f () -> Free (Halt f) a
-effFree (Pure ()) = wrap Noop
-effFree (Free as) = wrap $ Effect $ void as
-
--- TODO: move this and effFree into sep modules
-effF :: Functor f => F f () -> F (Halt f) a
-effF = toF . effFree . fromF -- TODO: make this more efficient!
+-- -- TODO: move this and effF into sep modules
+-- effFree :: Functor f => Free f () -> Free (Halt f) a
+-- effFree (Pure ()) = wrap Noop
+-- effFree (Free as) = wrap $ Effect $ void as
+-- 
+-- -- TODO: move this and effFree into sep modules
+-- effF :: Functor f => F f () -> F (Halt f) a
+-- effF = toF . effFree . fromF -- TODO: make this more efficient!
 
 -- -- Approach A (joel: this might require yoneda here?)
 --
@@ -314,31 +309,52 @@ foo = log "getting message"
 -- storeLoggingC (PutMessage _m _next)   = eff $ return ()
 
 
--- Approach D
-class MonadFree f (free f) => Program free f where
-  eff :: free f () -> free (Halt f) a
+--
+-- TODO try adding (Functor f, Monad (free f)) to get rid of Monad constraint on beforeEffect.
+--
+
+class (Functor f, MonadFree f (free f)) => Program free f where
+  -- Halt
+  eff    :: free f () -> free (Halt f) a
+  unhalt :: free (Halt f) a -> free f ()
+  -- Generalized free operations
+  hoist  :: Functor g => (f ~> g) -> (free f ~> free g)
+  foldProgram :: Monad m => (f ~> m) -> (free f ~> m)
 
 instance Functor f => Program Free f where
   eff (Pure ()) = wrap Noop
   eff (Free as) = wrap $ Effect $ void as
 
+  unhalt (Pure _)               = return ()
+  unhalt (Free Noop)            = return ()
+  unhalt (Free (Effect action)) = liftF action
+
+  hoist = hoistFree
+  foldProgram = foldFree
+
 instance Functor f => Program F f where
-  eff = toF . effFree . fromF -- TODO: make this more efficient!
+  eff = toF . eff . fromF -- TODO: make this more efficient!
 
--- Best one so far.
-storeLoggingD :: Program free LogF => StoreF ~> free (Halt LogF)
-storeLoggingD (GetMessage _mId _next) = eff $ log "getting message"
-storeLoggingD (PutMessage _m _next)   = eff $ return ()
+  unhalt = toF . unhalt . fromF -- TODO: make this more efficient!
 
+  hoist = hoistF
+  foldProgram = foldF
 
+storeLogging :: Program free LogF => StoreF ~> free (Halt LogF)
+storeLogging (GetMessage _mId _next) = eff $ log "getting message"
+storeLogging (PutMessage _m _next)   = eff $ return ()
 
-storeLogging :: StoreF ~> F (Halt LogF)
-storeLogging (GetMessage _mId _next) = effF $ log "getting message"
-storeLogging (PutMessage _m _next)   = effF $ return ()
+databaseLogging :: Program free LogF => DatabaseF ~> free (Halt LogF)
+databaseLogging (Query _ _)   = eff $ log "querying"
+databaseLogging (Execute _ _) = eff $ log "issuing execute"
 
-databaseLogging :: DatabaseF ~> F (Halt LogF)
-databaseLogging (Query _ _)   = effF $ log "querying"
-databaseLogging (Execute _ _) = effF $ log "issuing execute"
+-- storeLogging :: StoreF ~> F (Halt LogF)
+-- storeLogging (GetMessage _mId _next) = effF $ log "getting message"
+-- storeLogging (PutMessage _m _next)   = effF $ return ()
+--
+-- databaseLogging :: DatabaseF ~> F (Halt LogF)
+-- databaseLogging (Query _ _)   = effF $ log "querying"
+-- databaseLogging (Execute _ _) = effF $ log "issuing execute"
 
 
 
@@ -364,99 +380,122 @@ execLogging (Log str next) = next <$ putStrLn str
 
 -- Interpreter composition
 
--- TODO: move this into sep module
-unhaltFree :: Functor f => Free (Halt f) a -> Free f ()
-unhaltFree (Pure _)               = return ()
-unhaltFree (Free Noop)            = return ()
-unhaltFree (Free (Effect action)) = liftF action
+-- -- TODO: move this into sep module
+-- unhaltFree :: Functor f => Free (Halt f) a -> Free f ()
+-- unhaltFree (Pure _)               = return ()
+-- unhaltFree (Free Noop)            = return ()
+-- unhaltFree (Free (Effect action)) = liftF action
+-- 
+-- -- TODO: move this into sep module
+-- unhaltF :: Functor f => F (Halt f) a -> F f ()
+-- unhaltF = toF . unhaltFree . fromF -- TODO: make this more efficient!
 
 -- TODO: move this into sep module
-unhaltF :: Functor f => F (Halt f) a -> F f ()
-unhaltF = toF . unhaltFree . fromF -- TODO: make this more efficient!
-
--- TODO: move this into sep module
-beforeEffectFree :: (Functor g, Functor e)
-                 => f ~> Free g
-                 -> f ~> Free (Halt e)
-                 -> f ~> Free (g :+: e)
-(elaborate `beforeEffectFree` toEff) fa = do
-  a <- hoistFree InL $ elaborate fa
-  hoistFree InR $ unhaltFree $ toEff fa
+beforeEffect :: ( Program free g, Program free e, Monad (free (g :+: e)))
+             => f ~> free g
+             -> f ~> free (Halt e)
+             -> f ~> free (g :+: e)
+(elaborate `beforeEffect` toEff) fa = do
+  a <- hoist InL $ elaborate fa
+  hoist InR $ unhalt $ toEff fa
   return a
 
--- TODO: move this into sep module
-beforeEffectF :: Functor e
-              => f ~> F g
-              -> f ~> F (Halt e)
-              -> f ~> F (g :+: e)
-(elaborate `beforeEffectF` toEff) fa = do
-  a <- hoistF InL $ elaborate fa
-  hoistF InR $ unhaltF $ toEff fa
-  return a
+-- -- TODO: move this into sep module
+-- beforeEffectF :: Functor e
+--               => f ~> F g
+--               -> f ~> F (Halt e)
+--               -> f ~> F (g :+: e)
+-- (elaborate `beforeEffectF` toEff) fa = do
+--   a <- hoistF InL $ elaborate fa
+--   hoistF InR $ unhalt $ toEff fa
+--   return a
 
-{-
-afterEffect :: (Functor g, Functor e)
-            => f ~< g
-            -> f ~< Halt e
-            -> f ~< (e :+: g)
+afterEffect :: (Program free g, Program free e, Monad (free (e :+: g)))
+            => f ~> free g
+            -> f ~> free (Halt e)
+            -> f ~> free (e :+: g)
 (elaborate `afterEffect` toEff) fx = do
-  hoistFree InL $ unhalt $ toEff fx
-  hoistFree InR $ elaborate fx
+  hoist InL $ unhalt $ toEff fx
+  hoist InR $ elaborate fx
+
+-- afterEffect monomorphized to Free:
+afterEffectFree :: (Functor g, Functor e)
+                => f ~> Free g
+                -> f ~> Free (Halt e)
+                -> f ~> Free (e :+: g)
+afterEffectFree = afterEffect
 
 -- TODO: add betweenEffects? e.g. for logging before and after an instruction
 
-weave :: (Functor g, Functor h)
-      => f ~< g
-      -> f ~< h
-      -> f ~< (g :+: h)
+weave :: (Program free g, Program free h, Monad (free (g :+: h)))
+      => f ~> free g
+      -> f ~> free h
+      -> f ~> free (g :+: h)
 weave int1 int2 fx = do
-  _ <- hoistFree InL $ int1 fx
-  hoistFree InR $ int2 fx
+  _ <- hoist InL $ int1 fx
+  hoist InR $ int2 fx
 
-(~<+) :: (Functor g, Functor h)
-      => f ~< g
-      -> f ~< h
-      -> f ~< (g :+: h)
+
+(~<+) :: (Program free g, Program free h, Monad (free (g :+: h)))
+      => f ~> free g
+      -> f ~> free h
+      -> f ~> free (g :+: h)
 int1 ~<+ int2 = weave int1 int2
 
 infixl 3 ~<+
 
+
 -- Converts an interpreter to accept a program instead of an instruction.
-acceptProgram :: Monad g
+acceptProgram :: (Monad g, Program free f)
               => f ~> g
-              -> Free f ~> g
-acceptProgram = foldFree
+              -> free f ~> g
+acceptProgram = foldProgram
 
 -- "Horizontal" interpreter composition
-hCompose :: (Monad h)
+hCompose :: (Monad h, Program free g)
          => g ~> h
-         -> f ~< g
+         -> f ~> free g
          -> f ~> h
 int2 `hCompose` int1 = acceptProgram int2 . int1
 
-(~<>) :: (Monad h)
-      => f ~< g
+(~<>) :: (Monad h, Program free g)
+      => f ~> free g
       -> g ~> h
       -> f ~> h
 int1 ~<> int2 = int2 `hCompose` int1
 
 infixl 2 ~<>
 
-hComposeEffect :: (Functor g, Monad h)
+-- hCompose monomorphized to Free:
+hComposeFree :: (Functor g, Monad h)
+             => g ~> h
+             -> f ~> Free g
+             -> f ~> h
+hComposeFree = hCompose
+
+hComposeEffect :: (Program free g, Monad h)
       => g ~> h
-      -> f ~< Halt g
+      -> f ~> free (Halt g)
       -> f a
       -> h ()
 int2 `hComposeEffect` int1 = acceptProgram int2 . unhalt . int1
 
-(~<!>) :: (Functor g, Monad h)
-       => f ~< Halt g
+(~<!>) :: (Program free g, Monad h)
+       => f ~> free (Halt g)
        -> g ~> h
        -> f a
        -> h ()
 int1 ~<!> int2 = int2 `hComposeEffect` int1
 
 infixl 2 ~<!>
+
+-- hComposeEffect monomorphized to Free:
+hComposeEffectFree :: (Functor g, Monad h)
+      => g ~> h
+      -> f ~> Free (Halt g)
+      -> f a
+      -> h ()
+hComposeEffectFree = hComposeEffect
 
 mergeInterpreters :: a ~> c
                   -> b ~> c
@@ -486,20 +525,34 @@ infixl 3 +~<
 -- composition possible with parallel computations."
 
 execOnlyLogging :: StoreF a -> IO ()
-execOnlyLogging = storeDatabase ~<> databaseLogging ~<!> execLogging
+execOnlyLogging = storeDatabase' ~<> databaseLogging' ~<!> execLogging
+  --
+  -- TODO: we can do better than this. need concretized versions of combinators
+  --       for Free vs F, and change import to swap impl.
+  --
+  where
+    storeDatabase' :: StoreF ~> Free DatabaseF
+    storeDatabase' = storeDatabase
+
+    databaseLogging' :: DatabaseF ~> Free (Halt LogF)
+    databaseLogging' = databaseLogging
 
 execStore :: StoreF ~> IO
-execStore = (storeDatabase `afterEffect` storeLogging)
+execStore = (storeDatabase' `afterEffect` storeLogging)
         ~<> ((+~<) execLogging execDatabase)
+  where
+    storeDatabase' :: StoreF ~> Free DatabaseF
+    storeDatabase' = storeDatabase
 
 main :: IO ()
 main = void . acceptProgram execStore $ program
   where
+    acceptProgram = foldFree
     program = getThenPut $ MessageId 1
 
 
 
-
+{-
 -- Representing interpreter composition in terms of higher algebraic abstractions
 
 class Category1 (cat1 :: (* -> *) -> (* -> *) -> *) where
@@ -518,10 +571,4 @@ instance Category1 Interpreter where
 
 -- TODO: Arrow1/ArrowChoice1 for operators like &&&, |||, +++, ***
 --       Also, how does Profunctor fit in, if at all?
-
-
-
-
--- TODO: Using Codensity/CPS to increase efficiency
-
 -}
