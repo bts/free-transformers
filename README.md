@@ -1,3 +1,5 @@
+*UPDATE*: I've worked this into a library in a private project, that abstracts over `Free` and CPS'd `F` for efficiency. If you'd be interested in using this, let me know and I can release a package.
+
 An example Haskell implementation of the
 "[free transformers](http://degoes.net/articles/modern-fp-part-2)" approach to
 building modular programs by composing layers of `Free` interpreters.
